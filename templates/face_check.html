@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Vérification Faciale</title>
+</head>
+<body>
+    <h2>Vérification de visage (Uber/Lyft Style)</h2>
+
+    <form id="uploadForm" enctype="multipart/form-data">
+        <label>Photo ID:</label>
+        <input type="file" name="id_image" id="id_image" accept="image/*" required><br><br>
+
+        <video id="video" width="300" autoplay></video><br>
+        <button type="button" onclick="takeSelfie()">Prendre Selfie</button>
+
+        <input type="hidden" id="selfie_data" name="selfie">
+        <br><br>
+
+        <button type="button" onclick="sendData()">Vérifier</button>
+    </form>
+
+    <pre id="result"></pre>
+
+    <script>
+        const video = document.getElementById("video");
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; });
+
+        function takeSelfie() {
+            const canvas = document.createElement("canvas");
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext("2d").drawImage(video, 0, 0);
+
+            canvas.toBlob(blob => {
+                window.selfieBlob = blob;
+            }, "image/jpeg");
+        }
+
+        async function sendData() {
+            const form = new FormData();
+            form.append("id_image", document.getElementById("id_image").files[0]);
+            form.append("selfie", window.selfieBlob);
+
+            const res = await fetch("/verify_face", {
+                method: "POST",
+                body: form
+            });
+
+            document.getElementById("result").innerText = JSON.stringify(await res.json(), null, 2);
+        }
+    </script>
+
+</body>
+</html>

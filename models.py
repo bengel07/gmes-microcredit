@@ -296,3 +296,45 @@ class Transaction(db.Model):
     date_creation = db.Column(db.DateTime, default=datetime.utcnow)
     date_confirmation = db.Column(db.DateTime)
     metadata_info = db.Column(db.Text)  # Données supplémentaires au format JSON
+
+
+# === AJOUTEZ CETTE FONCTION À LA FIN DE models.py ===
+
+def get_statistiques():
+    """Récupère les statistiques réelles depuis la base de données"""
+    from sqlalchemy import func
+
+    # 1. Clients actifs
+    clients_actifs = Client.query.filter_by(statut='actif').count()
+
+    # 2. Total des prêts accordés (statut='approuvé' ou 'accordé' selon votre système)
+    total_prets = db.session.query(
+        func.coalesce(func.sum(Pret.montant), 0)
+    ).filter(Pret.statut.in_(['approuvé', 'accordé', 'actif'])).scalar()
+
+    # 3. Taux de remboursement (calcul basé sur les remboursements)
+    total_rembourse = db.session.query(
+        func.coalesce(func.sum(Remboursement.montant), 0)
+    ).filter(Remboursement.statut == 'payé').scalar()
+
+    total_a_rembourser = db.session.query(
+        func.coalesce(func.sum(Pret.montant_total), 1)
+    ).filter(Pret.statut.in_(['approuvé', 'accordé', 'actif'])).scalar() or 1
+
+    if total_a_rembourser and total_a_rembourser > 0:
+        taux_remboursement = int((total_rembourse / total_a_rembourser) * 100)
+        taux_remboursement = min(taux_remboursement, 100)  # Ne pas dépasser 100%
+    else:
+        taux_remboursement = 0
+
+    # 4. Communautés (basé sur les zones des groupes)
+    communautes = db.session.query(
+        func.count(func.distinct(Groupe.zone))
+    ).filter(Groupe.zone.isnot(None)).scalar() or 0
+
+    return {
+        'clients_actifs': clients_actifs,
+        'prets_accordes': float(total_prets) if total_prets else 0,
+        'taux_remboursement': taux_remboursement,
+        'communautes': communautes
+    }

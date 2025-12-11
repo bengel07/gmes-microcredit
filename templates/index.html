@@ -21,4 +21,27 @@
         <li>📱 <strong>Mobile</strong> - Application mobile</li>
     </ul>
 </div>
+    <!-- ===== AJOUTEZ CETTE SECTION COMPLÈTE ===== -->
+<div class="stats-section">
+    <h3>📊 Notre Impact</h3>
+    <div class="stats-container">
+        <div class="stat-item">
+            <div class="stat-number">{{ clients_actifs }}{% if clients_actifs > 999 %}+{% endif %}</div>
+            <div class="stat-label">Clients Actifs</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number">HTG {{ "{:,.1f}".format(prets_accordes/1000) }}K</div>
+            <div class="stat-label">Prêts Accordés</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number">{{ taux_remboursement }}%</div>
+            <div class="stat-label">Taux de Remboursement</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-number">{{ communautes }}{% if communautes > 9 %}+{% endif %}</div>
+            <div class="stat-label">Communautés Desservies</div>
+        </div>
+    </div>
+</div>
+<!-- ===== FIN DE LA SECTION À AJOUTER ===== -->
 {% endblock %}

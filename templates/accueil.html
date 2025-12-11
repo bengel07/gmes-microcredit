@@ -63,19 +63,19 @@
     <div class="stats-container">
         <div class="stat-item">
             <div class="stat-number">1,250+</div>
-            <div class="stat-label">Clients Actifs</div>
+            <div class="stat-number">{{ clients_actifs }}+</div>
         </div>
         <div class="stat-item">
             <div class="stat-number">₲ 5.2M</div>
-            <div class="stat-label">Prêts Accordés</div>
+            <div class="stat-number">HTG {{ prets_accordes|format_htg }}</div>
         </div>
         <div class="stat-item">
             <div class="stat-number">98%</div>
-            <div class="stat-label">Taux de Remboursement</div>
+            <div class="stat-number">{{ taux_remboursement }}%</div>
         </div>
         <div class="stat-item">
             <div class="stat-number">25+</div>
-            <div class="stat-label">Communautés Desservies</div>
+            <div class="stat-number">{{ communautes_desservies }}+</div>
         </div>
     </div>
 </div>

@@ -11,47 +11,20 @@ import os
 import cv2
 import numpy as np
 from werkzeug.utils import secure_filename
-import face_recognition
+
 from PIL import Image
 import io
 import base64
 
+from deepface import DeepFace
+import mediapipe as mp
+from fastapi import FastAPI, Request, UploadFile, File
+from fastapi.templating import Jinja2Templates
 import warnings
 from pkg_resources import PkgResourcesDeprecationWarning
 warnings.filterwarnings("ignore", category=PkgResourcesDeprecationWarning)
-
-# Créer le dossier uploads s'il n'existe pas
-# if not os.path.exists('static/uploads'):
-#     os.makedirs('static/uploads')
-
-# from app import db  # Assure-toi que db est bien importé depuis ton app principale
 from models import Groupe  # Import direct du modèle
-
-# Importer et enregistrer le blueprint auth
 load_dotenv()  # Charge les variables d'environnement
-
-import os
-
-# Désactiver face-recognition sur Render
-ON_RENDER = 'RENDER' in os.environ
-
-if ON_RENDER:
-    # Simuler face_recognition sur Render
-    class FakeFaceRecognition:
-        def face_encodings(self, *args, **kwargs):
-            return [None]
-
-        def face_distance(self, *args, **kwargs):
-            return [0.5]
-
-        def load_image_file(self, *args, **kwargs):
-            return None
-
-
-    # Créer un module factice
-    import sys
-
-    sys.modules['face_recognition'] = FakeFaceRecognition()
 
 # Configuration de l'application
 app = Flask(__name__)
@@ -70,6 +43,34 @@ db = SQLAlchemy(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'connexion'
+
+
+mp_face = mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.6)
+mp_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
+
+def detect_face(img):
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    result = mp_face.process(rgb)
+    return result.detections
+
+def is_fake_image(img):
+    """Détection anti-fake : photo d’écran / imprimée / IA"""
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    result = mp_mesh.process(rgb)
+
+    if not result.multi_face_landmarks:
+        return True
+
+    blur = cv2.Laplacian(img, cv2.CV_64F).var()
+    brightness = np.mean(img)
+
+    if blur < 35:  # trop flou → photocopie ou écran
+        return True
+
+    if brightness < 30:  # trop sombre → suspect
+        return True
+
+    return False
 
 
 # ==================== MODÈLES COMPLETS ====================
@@ -121,32 +122,6 @@ class User(UserMixin, db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-    # def has_permission(self, permission_name):
-    #     """Méthode d'instance pour has_permission - Version corrigée"""
-    #     if not self:
-    #         return False
-    #
-    #     # Admin a tous les accès
-    #     if self.role == 'admin':
-    #         return True
-    #
-    #     # Superviseur a accès à tous les dashboards employés
-    #     elif self.role == 'superviseur':
-    #         return permission_name in ['caissier', 'conseiller', 'analyste_credit', 'gestionnaire_groupe', 'rapports']
-    #
-    #     # Employé vérifie ses permissions spécifiques
-    #     elif self.role == 'employe':
-    #         if self.permissions:
-    #             try:
-    #                 import json
-    #                 permissions_list = json.loads(self.permissions)
-    #                 return permission_name in permissions_list
-    #             except:
-    #                 return False
-    #         # Fallback: vérifier via la fonction
-    #         return current_user.has_permission(self, permission_name)
-    #
-    #     return False
 
     def has_permission(self, permission_name):
         """Méthode d'instance pour has_permission - Version corrigée"""
@@ -221,6 +196,46 @@ def compare_faces(id_image_path, selfie_image_path):
 
     except Exception as e:
         return False, f"Erreur de comparaison: {str(e)}"
+
+
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/face-check")
+def face_check(request: Request):
+    return templates.TemplateResponse("face_check.html", {"request": request})
+
+@app.post("/verify_face")
+async def verify_face(id_image: UploadFile = File(...), selfie: UploadFile = File(...)):
+
+    id_bytes = await id_image.read()
+    selfie_bytes = await selfie.read()
+
+    id_img = cv2.imdecode(np.frombuffer(id_bytes, np.uint8), cv2.IMREAD_COLOR)
+    selfie_img = cv2.imdecode(np.frombuffer(selfie_bytes, np.uint8), cv2.IMREAD_COLOR)
+
+    # 1. Visage détecté ?
+    if not detect_face(id_img):
+        return {"success": False, "error": "Aucun visage détecté sur la pièce d'identité."}
+
+    if not detect_face(selfie_img):
+        return {"success": False, "error": "Aucun visage détecté sur le selfie."}
+
+    # 2. Anti-fake
+    if is_fake_image(selfie_img):
+        return {"success": False, "error": "Selfie suspect — possible photo d'écran ou impression."}
+
+    # 3. Comparaison IA (Facenet512)
+    result = DeepFace.verify(
+        img1_path=id_bytes,
+        img2_path=selfie_bytes,
+        model_name="Facenet512",
+        distance_metric="cosine",
+        enforce_detection=False
+    )
+
+    score = round((1 - result["distance"]) * 100, 2)
+
+    return {"success": result["verified"], "score": score}
 
 
 @app.route('/conseiller/creer-dossier', methods=['GET', 'POST'])
@@ -302,10 +317,7 @@ def creer_dossier():
                 photo_id=id_filename,
                 photo_selfie=selfie_filename,
                 verification_faciale=True,
-                score_verification=round((1 - face_recognition.face_distance(
-                    [face_recognition.face_encodings(face_recognition.load_image_file(id_path))[0]],
-                    face_recognition.face_encodings(face_recognition.load_image_file(selfie_path))[0]
-                )[0]) * 100, 2),
+                score_verification=float(message.replace("Similarité:", "").replace("%", "").strip()),
                 role='client',
                 statut='actif'
             )
@@ -670,6 +682,48 @@ def calculer_statistiques_utilisateur(user):
     return stats
 
 
+# Dans app.py ou routes.py
+@app.route('/')
+def index():
+    # Récupérer les vraies valeurs depuis votre base de données
+    from models import db, Client, Pret, Remboursement
+    from models import get_statistiques
+
+    # Récupérer les statistiques réelles
+    stats = get_statistiques()
+
+    # Calculer les statistiques réelles
+    total_clients = db.session.query(Client).count()
+
+    total_prets = db.session.query(db.func.sum(Pret.montant)).scalar() or 0
+
+    # Calcul du taux de remboursement
+    total_due = db.session.query(db.func.sum(Pret.montant)).scalar() or 1
+    total_paid = db.session.query(db.func.sum(Remboursement.montant)).scalar() or 0
+    taux_remboursement = int((total_paid / total_due) * 100) if total_due > 0 else 0
+
+    # Passer les variables au template
+    return render_template('index.html',
+                           clients_actifs=total_clients,
+                           prets_accordes=total_prets,
+                           taux_remboursement=taux_remboursement,
+                           communautes_desservies=5)  # À adapter
+
+
+
+# === AJOUTEZ CE FILTRE JINJA2 ===
+
+@app.template_filter('format_htg')
+def format_htg(value):
+    """Formate les montants en HTG"""
+    value = float(value)
+    if value >= 1000000:
+        return f"{(value/1000000):.1f}M"
+    elif value >= 1000:
+        return f"{(value/1000):.0f}K"
+    return f"{value:,.0f}"
+
+
 # Ajoutez cette fonction utilitaire
 def save_base64_image(base64_string, output_path):
     """Convertit et sauvegarde une image base64"""
@@ -791,29 +845,6 @@ with app.app_context():
 @app.route('/')
 def accueil():
     return render_template('accueil.html')
-
-
-
-# @app.route('/connexion', methods=['GET', 'POST'])
-# def connexion():
-#     if request.method == 'POST':
-#         identifiant = request.form.get('identifiant')
-#         mot_de_passe = request.form.get('password')
-#
-#         user = User.query.filter(
-#             (User.username == identifiant) | (User.email == identifiant)
-#         ).first()
-#
-#         if user and user.check_password(mot_de_passe):
-#             login_user(user)
-#             print(f"✅ Connexion réussie: {user.role}")
-#
-#             # 🔄 UTILISEZ LA NOUVELLE REDIRECTION UNIVERSELLE
-#             return redirect(url_for('dashboard_redirect'))
-#
-#         return render_template('connexion.html', erreur="Identifiant ou mot de passe incorrect")
-#
-#     return render_template('connexion.html')
 
 
 @app.route('/connexion', methods=['GET', 'POST'])
@@ -1027,11 +1058,6 @@ def calculer_echeancier(pret_id):
 
 # ==================== GESTION DES GROUPES DE SOLIDARITÉ ====================
 
-# @app.route('/groupes')
-# @login_required
-# def liste_groupes():
-#     groupes = Groupe.query.all()
-#     return render_template('liste_groupes.html', groupes=groupes)
 
 
 @app.route('/groupes')
