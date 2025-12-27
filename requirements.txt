@@ -17,3 +17,5 @@ tensorflow==2.15.0  # Cette version supporte numpy 1.26.4
 gunicorn==21.2.0
 python-dotenv==1.0.1
 deepface==0.0.89
+tf_keras==2.15.0
+
