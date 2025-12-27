@@ -19,5 +19,6 @@ python-dotenv==1.0.1
 deepface==0.0.89
 tf_keras==2.15.0
 mediapipe==0.10.31  # Dernière version disponible
+fastapi==0.109.2  # Dernière version stable
 
 
